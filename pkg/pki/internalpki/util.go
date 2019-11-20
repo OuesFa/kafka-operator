@@ -21,14 +21,17 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"time"
 )
 
+// newCA returns an unsigned CA Certificate object with the given organization
 func newCA(ou string) *x509.Certificate {
 	return &x509.Certificate{
 		SerialNumber: newSerial(),
 		Subject: pkix.Name{
+			CommonName:   fmt.Sprintf("%s-ca", ou),
 			Organization: []string{ou},
 		},
 		NotBefore:             time.Now(),
@@ -40,6 +43,7 @@ func newCA(ou string) *x509.Certificate {
 	}
 }
 
+// newCert returns an unsigned client/server certificate with the given values
 func newCert(cn, ou string, dnsNames []string, expiry time.Time) *x509.Certificate {
 	return &x509.Certificate{
 		SerialNumber: newSerial(),
@@ -56,14 +60,21 @@ func newCert(cn, ou string, dnsNames []string, expiry time.Time) *x509.Certifica
 	}
 }
 
+// newKey generates a 4096-bit RSA keypair
 func newKey() (*rsa.PrivateKey, error) {
 	return rsa.GenerateKey(rand.Reader, 4096)
 }
 
+// newSerial returns a serial number for a certificate. These values don't need
+// to be random, but need to be unique within a PKI. Generating a random number for this
+// adds to the certificate creation time quite a bit since generating a key takes a fair amount
+// of entropy already. Taking the nano value since epoch instead gives us a number that
+// will always be different within a PKI since the controller does not allow concurrent reconciles.
 func newSerial() *big.Int {
 	return big.NewInt(time.Now().UnixNano())
 }
 
+// encodeToPEM takes a CA, signed certificate, and key - and returns their PEM encoded values
 func encodeToPEM(ca *x509.Certificate, certBytes []byte, key *rsa.PrivateKey) (caPEM, certPEM, keyPEM []byte, err error) {
 	caPEMBuf := new(bytes.Buffer)
 	if err := pem.Encode(caPEMBuf, &pem.Block{

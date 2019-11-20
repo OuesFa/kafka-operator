@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// ReconcileUserCertificate ensures and returns a user TLS certificate
 func (i *internalPKI) ReconcileUserCertificate(ctx context.Context, user *v1alpha1.KafkaUser, scheme *runtime.Scheme) (*pkicommon.UserCertificate, error) {
 	secret, err := getUserSecret(ctx, i.client, user)
 	if err != nil {
@@ -48,6 +49,7 @@ func (i *internalPKI) ReconcileUserCertificate(ctx context.Context, user *v1alph
 	}, nil
 }
 
+// FinalizeUserCertificate returns nil as owner reference on secret handles cleanup
 func (i *internalPKI) FinalizeUserCertificate(ctx context.Context, user *v1alpha1.KafkaUser) error {
 	return nil
 }

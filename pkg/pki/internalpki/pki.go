@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// FinalizePKI returns nil since owner references handle secret cleanup
 func (i *internalPKI) FinalizePKI(ctx context.Context, logger logr.Logger) error { return nil }
 
 func (i *internalPKI) ReconcilePKI(ctx context.Context, logger logr.Logger, scheme *runtime.Scheme) error {

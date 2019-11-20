@@ -26,15 +26,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/templates"
 	certutil "github.com/banzaicloud/kafka-operator/pkg/util/cert"
-	pkicommon "github.com/banzaicloud/kafka-operator/pkg/util/pki"
+	pkiutil "github.com/banzaicloud/kafka-operator/pkg/util/pki"
 )
 
+// createNewCA creates a new CA for a given cluster, and stores it in a kubernetes secret
 func createNewCA(ctx context.Context, client client.Client, cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) error {
 	caSecret, err := newClusterCASecret(cluster, scheme)
 	if err != nil {
@@ -43,41 +42,53 @@ func createNewCA(ctx context.Context, client client.Client, cluster *v1beta1.Kaf
 	return client.Create(ctx, caSecret)
 }
 
+// newClusterCASecret generates a new CA certificate and returns a Kubernetes secret object
+// with PEM encoded fields.
 func newClusterCASecret(cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) (*corev1.Secret, error) {
+	// generate a new CA certificate using cluster name as Organization
 	ca := newCA(cluster.Name)
+	// generate a new RSA key
 	caPrivKey, err := newKey()
 	if err != nil {
 		return nil, err
 	}
+	// Sign the certificate with the key
 	caBytes, err := x509.CreateCertificate(rand.Reader, ca, ca, &caPrivKey.PublicKey, caPrivKey)
 	if err != nil {
 		return nil, err
 	}
+	// PEM encode the certificate and key and return a secret
 	_, caPEM, caKeyPEM, err := encodeToPEM(ca, caBytes, caPrivKey)
 	if err != nil {
 		return nil, err
 	}
 	caSecret := &corev1.Secret{
-		ObjectMeta: templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerCACertTemplate, cluster.Name), pkicommon.LabelsForKafkaPKI(cluster.Name), cluster),
-		Data: map[string][]byte{
-			v1alpha1.CoreCACertKey:  caPEM,
-			corev1.TLSCertKey:       caPEM,
-			corev1.TLSPrivateKeyKey: caKeyPEM,
-		},
+		ObjectMeta: templates.ObjectMeta(
+			fmt.Sprintf(pkiutil.BrokerCACertTemplate, cluster.Name),
+			pkiutil.LabelsForKafkaPKI(cluster.Name),
+			cluster,
+		),
+		Data: pkiutil.SecretDataForCert(caPEM, caPEM, caKeyPEM),
 	}
-	controllerutil.SetControllerReference(cluster, caSecret, scheme)
 	return caSecret, nil
 }
 
+// getCA retrieves the CA certificate and signing key for a given KafkaCluster
 func getCA(ctx context.Context, client client.Client, cluster *v1beta1.KafkaCluster) (*x509.Certificate, *rsa.PrivateKey, error) {
 	o := types.NamespacedName{
-		Name:      fmt.Sprintf(pkicommon.BrokerCACertTemplate, cluster.Name),
+		Name:      fmt.Sprintf(pkiutil.BrokerCACertTemplate, cluster.Name),
 		Namespace: cluster.Namespace,
 	}
+	// fetch the secret
 	caSecret := &corev1.Secret{}
 	if err := client.Get(ctx, o, caSecret); err != nil {
 		return nil, nil, err
 	}
+	// make sure we still have the required fields
+	if err := verifyCASecretFields(caSecret); err != nil {
+		return nil, nil, err
+	}
+	// decode the PEM objects
 	cert, err := certutil.DecodeCertificate(caSecret.Data[corev1.TLSCertKey])
 	if err != nil {
 		return nil, nil, err
@@ -87,5 +98,17 @@ func getCA(ctx context.Context, client client.Client, cluster *v1beta1.KafkaClus
 	if err != nil {
 		return nil, nil, err
 	}
+	// return the cert object and signing key
 	return cert, privKey.(*rsa.PrivateKey), nil
+}
+
+// verifyCASecretFields checks to make sure the certificate and key are present
+// in a secret and returns an error if either are missing.
+func verifyCASecretFields(secret *corev1.Secret) error {
+	for _, key := range []string{corev1.TLSCertKey, corev1.TLSPrivateKeyKey} {
+		if _, ok := secret.Data[key]; !ok {
+			return fmt.Errorf("No key %s in secret", key)
+		}
+	}
+	return nil
 }

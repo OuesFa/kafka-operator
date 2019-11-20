@@ -22,14 +22,18 @@ import (
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
+	"github.com/banzaicloud/kafka-operator/pkg/util"
+	pkiutil "github.com/banzaicloud/kafka-operator/pkg/util/pki"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+// newUserSecret generates a Certificate and signs it using the cluster CA, and returns
+// a kubernetes secret with the PEM encoded data.
 func newUserSecret(ctx context.Context, client client.Client, cluster *v1beta1.KafkaCluster, user *v1alpha1.KafkaUser, scheme *runtime.Scheme) (*corev1.Secret, error) {
 	ca, signingKey, err := getCA(ctx, client, cluster)
 	if err != nil {
@@ -53,18 +57,18 @@ func newUserSecret(ctx context.Context, client client.Client, cluster *v1beta1.K
 		return nil, err
 	}
 
-	userSecret := &corev1.Secret{}
-	userSecret.Name = user.Spec.SecretName
-	userSecret.Namespace = user.Namespace
-	userSecret.Data = map[string][]byte{
-		v1alpha1.CoreCACertKey:  caPEM,
-		corev1.TLSCertKey:       certPEM,
-		corev1.TLSPrivateKeyKey: keyPEM,
+	userSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            user.Spec.SecretName,
+			Namespace:       user.Namespace,
+			OwnerReferences: util.OwnerReference(user.TypeMeta, user.ObjectMeta),
+		},
+		Data: pkiutil.SecretDataForCert(caPEM, certPEM, keyPEM),
 	}
-	controllerutil.SetControllerReference(user, userSecret, scheme)
 	return userSecret, client.Create(ctx, userSecret)
 }
 
+// getUserSecret retrieves the kubernetes secret for a given KafkaUser
 func getUserSecret(ctx context.Context, client client.Client, user *v1alpha1.KafkaUser) (*corev1.Secret, error) {
 	secret := &corev1.Secret{}
 	o := types.NamespacedName{Name: user.Spec.SecretName, Namespace: user.Namespace}

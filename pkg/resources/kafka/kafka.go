@@ -503,6 +503,19 @@ func (r *Reconciler) reconcileKafkaPod(log logr.Logger, desiredPod *corev1.Pod) 
 	}
 	// TODO check if this err == nil check necessary (baluchicken)
 	if err == nil {
+		//Since toleration does not support patchStrategy:"merge,retainKeys", we need to add all toleration from the current pod if the toleration is set in the CR
+		if len(desiredPod.Spec.Tolerations) > 0 {
+			desiredPod.Spec.Tolerations = append(desiredPod.Spec.Tolerations, currentPod.Spec.Tolerations...)
+			uniqueTolerations := []corev1.Toleration{}
+			keys := make(map[corev1.Toleration]bool)
+			for _, t := range desiredPod.Spec.Tolerations {
+				if _, value := keys[t]; !value {
+					keys[t] = true
+					uniqueTolerations = append(uniqueTolerations, t)
+				}
+			}
+			desiredPod.Spec.Tolerations = uniqueTolerations
+		}
 		// Check if the resource actually updated
 		patchResult, err := patch.DefaultPatchMaker.Calculate(currentPod, desiredPod)
 		if err != nil {
@@ -577,10 +590,6 @@ func (r *Reconciler) reconcileKafkaPod(log logr.Logger, desiredPod *corev1.Pod) 
 			}
 		}
 
-		err = k8sutil.UpdateCrWithNodeAffinity(currentPod, r.KafkaCluster, r.Client)
-		if err != nil {
-			return errorfactory.New(errorfactory.StatusUpdateError{}, err, "updating cr with node affinity failed")
-		}
 		err = r.Client.Delete(context.TODO(), currentPod)
 		if err != nil {
 			return errorfactory.New(errorfactory.APIFailure{}, err, "deleting resource failed", "kind", desiredType)

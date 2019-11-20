@@ -48,7 +48,7 @@ spec:
   listenersConfig:
     externalListeners:
       - type: "ssl"
-        name: "ssl"
+        name: "external"
         externalStartingPort: 19090
         containerPort: 9094
     internalListeners:
